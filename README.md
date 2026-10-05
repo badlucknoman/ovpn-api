@@ -212,15 +212,15 @@ After GitHub Actions updates the repository, the JSON files can be accessed thro
 Example:
 
 ```text
-https://raw.githubusercontent.com/USERNAME/REPOSITORY/main/tcp.json
+https://raw.githubusercontent.com/badlucknoman/ovpn-api/main/tcp.json
 ```
 
 ```text
-https://raw.githubusercontent.com/USERNAME/REPOSITORY/main/udp.json
+https://raw.githubusercontent.com/badlucknoman/ovpn-api/main/udp.json
 ```
 
 ```text
-https://raw.githubusercontent.com/USERNAME/REPOSITORY/main/all.json
+https://raw.githubusercontent.com/badlucknoman/ovpn-api/main/all.json
 ```
 
 Replace `USERNAME` and `REPOSITORY` with your GitHub username and repository name.

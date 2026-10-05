@@ -3,6 +3,7 @@ import base64
 import json
 import sys
 import re
+import os
 
 
 # ============================================================
@@ -39,31 +40,36 @@ HEADERS = {
 
 
 # ============================================================
+# REQUEST SETTINGS
+# ============================================================
+
+REQUEST_TIMEOUT = 30
+
+
+# ============================================================
 # BASE64 ENCODING
 # ============================================================
 
 def encode_ovpn_config(config):
-    """
-    Encode a plain-text OVPN configuration to Base64.
-    """
 
     if not config:
         return ""
 
     try:
+
         config = str(config).strip()
 
         if not config:
             return ""
 
-        encoded = base64.b64encode(
+        return base64.b64encode(
             config.encode("utf-8")
         ).decode("ascii")
 
-        return encoded
-
     except Exception as e:
+
         print(f"Base64 encoding error: {e}")
+
         return ""
 
 
@@ -72,16 +78,6 @@ def encode_ovpn_config(config):
 # ============================================================
 
 def normalize_protocol(protocol):
-    """
-    Normalize protocol values.
-
-    Examples:
-        tcp      -> tcp
-        tcp4     -> tcp
-        tcp-client -> tcp
-        udp      -> udp
-        udp4     -> udp
-    """
 
     if not protocol:
         return ""
@@ -98,18 +94,16 @@ def normalize_protocol(protocol):
 
 
 # ============================================================
-# DETECT PROTOCOL FROM OVPN CONFIG
+# DETECT PROTOCOL FROM OVPN
 # ============================================================
 
 def detect_protocol_from_ovpn(config):
-    """
-    Detect TCP or UDP from an OVPN configuration.
-    """
 
     if not config:
         return ""
 
     try:
+
         text = str(config).lower()
 
         if re.search(
@@ -133,18 +127,16 @@ def detect_protocol_from_ovpn(config):
 
 
 # ============================================================
-# EXTRACT REMOTE HOST AND PORT
+# EXTRACT REMOTE
 # ============================================================
 
 def extract_remote(config):
-    """
-    Extract the remote host and port from an OVPN config.
-    """
 
     if not config:
         return "", ""
 
     try:
+
         match = re.search(
             r"^\s*remote\s+([^\s]+)\s+([0-9]+)",
             config,
@@ -152,10 +144,11 @@ def extract_remote(config):
         )
 
         if match:
-            host = match.group(1).strip()
-            port = match.group(2).strip()
 
-            return host, port
+            return (
+                match.group(1).strip(),
+                match.group(2).strip()
+            )
 
     except Exception:
         pass
@@ -164,19 +157,16 @@ def extract_remote(config):
 
 
 # ============================================================
-# CLEAN OVPN CONFIGURATION
+# CLEAN OVPN CONFIG
 # ============================================================
 
 def clean_ovpn_config(config):
-    """
-    Remove configuration lines that may cause compatibility
-    problems with older OpenVPN libraries.
-    """
 
     if not config:
         return ""
 
     try:
+
         lines = config.splitlines()
         cleaned = []
 
@@ -184,7 +174,7 @@ def clean_ovpn_config(config):
 
             stripped = line.strip()
 
-            # Remove data-ciphers AES-128-CBC line.
+            # Remove data-ciphers AES-128-CBC.
             if stripped.lower().startswith("data-ciphers "):
 
                 if "AES-128-CBC" in stripped.upper():
@@ -195,6 +185,7 @@ def clean_ovpn_config(config):
         return "\n".join(cleaned).strip()
 
     except Exception:
+
         return config
 
 
@@ -203,11 +194,6 @@ def clean_ovpn_config(config):
 # ============================================================
 
 def make_unique_key(ip, protocol):
-    """
-    Create a unique key using IP + protocol.
-
-    This allows the same IP to have both TCP and UDP entries.
-    """
 
     return (
         str(ip).strip().lower()
@@ -217,7 +203,7 @@ def make_unique_key(ip, protocol):
 
 
 # ============================================================
-# FETCH VPN GATE SERVERS
+# FETCH VPNGATE
 # ============================================================
 
 def fetch_vpngate_csv(existing_keys):
@@ -231,16 +217,17 @@ def fetch_vpngate_csv(existing_keys):
         response = requests.get(
             VPNGATE_CSV_URL,
             headers=HEADERS,
-            timeout=20
+            timeout=REQUEST_TIMEOUT
         )
 
         print(
-            f"VPN Gate HTTP status: "
-            f"{response.status_code}"
+            f"VPN Gate HTTP status: {response.status_code}"
         )
 
         if response.status_code != 200:
+
             print("VPN Gate request failed.")
+
             return configs
 
         lines = response.text.splitlines()
@@ -249,7 +236,6 @@ def fetch_vpngate_csv(existing_keys):
 
             try:
 
-                # Skip comments and empty lines.
                 if (
                     line.startswith("#")
                     or line.startswith("*")
@@ -262,7 +248,6 @@ def fetch_vpngate_csv(existing_keys):
                 if len(parts) < 15:
                     continue
 
-                # VPN Gate CSV fields.
                 ip = parts[1].strip()
                 score = parts[2].strip()
                 ping = parts[3].strip()
@@ -274,12 +259,8 @@ def fetch_vpngate_csv(existing_keys):
                 if not ip or not base64_config:
                     continue
 
-                # VPN Gate provides the OVPN configuration
-                # as Base64.
-                #
-                # Decode it temporarily only to inspect and
-                # clean the configuration.
                 try:
+
                     ovpn_config = base64.b64decode(
                         base64_config,
                         validate=False
@@ -289,17 +270,16 @@ def fetch_vpngate_csv(existing_keys):
                     )
 
                 except Exception:
+
                     continue
 
                 if not ovpn_config.strip():
                     continue
 
-                # Clean configuration.
                 ovpn_config = clean_ovpn_config(
                     ovpn_config
                 )
 
-                # Detect protocol.
                 protocol = detect_protocol_from_ovpn(
                     ovpn_config
                 )
@@ -307,7 +287,6 @@ def fetch_vpngate_csv(existing_keys):
                 if not protocol:
                     continue
 
-                # Create unique key.
                 unique_key = make_unique_key(
                     ip,
                     protocol
@@ -316,12 +295,10 @@ def fetch_vpngate_csv(existing_keys):
                 if unique_key in existing_keys:
                     continue
 
-                # Extract remote port.
                 remote_host, remote_port = extract_remote(
                     ovpn_config
                 )
 
-                # Encode cleaned OVPN configuration.
                 encoded_config = encode_ovpn_config(
                     ovpn_config
                 )
@@ -347,24 +324,22 @@ def fetch_vpngate_csv(existing_keys):
                 existing_keys.add(unique_key)
 
             except Exception:
+
                 continue
 
     except Exception as e:
 
-        print(
-            f"VPN Gate error: {e}"
-        )
+        print(f"VPN Gate error: {e}")
 
     print(
-        f"VPN Gate servers collected: "
-        f"{len(configs)}"
+        f"VPN Gate servers collected: {len(configs)}"
     )
 
     return configs
 
 
 # ============================================================
-# FETCH TELEXy SERVERS
+# FETCH TELEXy
 # ============================================================
 
 def fetch_telexy_json(
@@ -385,24 +360,24 @@ def fetch_telexy_json(
         response = requests.get(
             url,
             headers=HEADERS,
-            timeout=20
+            timeout=REQUEST_TIMEOUT
         )
 
         print(
-            f"Telexy HTTP status: "
-            f"{response.status_code}"
+            f"Telexy HTTP status: {response.status_code}"
         )
 
         if response.status_code != 200:
+
             print(
                 f"Telexy {default_protocol.upper()} "
                 f"request failed."
             )
+
             return configs
 
         data = response.json()
 
-        # Handle different possible API response formats.
         if isinstance(data, list):
 
             items = data
@@ -430,9 +405,9 @@ def fetch_telexy_json(
                 if not isinstance(item, dict):
                     continue
 
-                # ------------------------------------------------
-                # IP ADDRESS
-                # ------------------------------------------------
+                # ==================================================
+                # IP
+                # ==================================================
 
                 ip = str(
                     item.get("ip")
@@ -444,9 +419,9 @@ def fetch_telexy_json(
                 if not ip:
                     continue
 
-                # ------------------------------------------------
+                # ==================================================
                 # PROTOCOL
-                # ------------------------------------------------
+                # ==================================================
 
                 protocol = normalize_protocol(
                     item.get("transport")
@@ -455,11 +430,12 @@ def fetch_telexy_json(
                 )
 
                 if not protocol:
+
                     protocol = default_protocol
 
-                # ------------------------------------------------
-                # OVPN CONFIGURATION
-                # ------------------------------------------------
+                # ==================================================
+                # OVPN CONFIG
+                # ==================================================
 
                 raw_config = (
                     item.get("ovpn_config")
@@ -476,9 +452,9 @@ def fetch_telexy_json(
                     raw_config
                 ).strip()
 
-                # ------------------------------------------------
-                # CHECK WHETHER CONFIG IS ALREADY BASE64
-                # ------------------------------------------------
+                # ==================================================
+                # CHECK BASE64
+                # ==================================================
 
                 is_base64 = False
 
@@ -506,14 +482,16 @@ def fetch_telexy_json(
                         or "proto " in decoded_text.lower()
                         or "<ca>" in decoded_text.lower()
                     ):
+
                         is_base64 = True
 
                 except Exception:
+
                     is_base64 = False
 
-                # ------------------------------------------------
-                # ALREADY BASE64
-                # ------------------------------------------------
+                # ==================================================
+                # BASE64 CONFIG
+                # ==================================================
 
                 if is_base64:
 
@@ -523,16 +501,13 @@ def fetch_telexy_json(
                         raw_config
                     )
 
-                    # Detect protocol from decoded config.
                     try:
 
-                        decoded_config = (
-                            base64.b64decode(
-                                encoded_config
-                            ).decode(
-                                "utf-8",
-                                errors="ignore"
-                            )
+                        decoded_config = base64.b64decode(
+                            encoded_config
+                        ).decode(
+                            "utf-8",
+                            errors="ignore"
                         )
 
                         detected_protocol = (
@@ -542,14 +517,16 @@ def fetch_telexy_json(
                         )
 
                         if detected_protocol:
+
                             protocol = detected_protocol
 
                     except Exception:
+
                         pass
 
-                # ------------------------------------------------
-                # PLAIN TEXT OVPN
-                # ------------------------------------------------
+                # ==================================================
+                # PLAIN TEXT CONFIG
+                # ==================================================
 
                 else:
 
@@ -564,6 +541,7 @@ def fetch_telexy_json(
                     )
 
                     if detected_protocol:
+
                         protocol = detected_protocol
 
                     encoded_config = encode_ovpn_config(
@@ -573,9 +551,9 @@ def fetch_telexy_json(
                 if not encoded_config:
                     continue
 
-                # ------------------------------------------------
+                # ==================================================
                 # UNIQUE KEY
-                # ------------------------------------------------
+                # ==================================================
 
                 unique_key = make_unique_key(
                     ip,
@@ -585,9 +563,9 @@ def fetch_telexy_json(
                 if unique_key in existing_keys:
                     continue
 
-                # ------------------------------------------------
-                # SERVER INFORMATION
-                # ------------------------------------------------
+                # ==================================================
+                # SERVER INFO
+                # ==================================================
 
                 country = str(
                     item.get("country")
@@ -642,6 +620,7 @@ def fetch_telexy_json(
                 existing_keys.add(unique_key)
 
             except Exception:
+
                 continue
 
     except Exception as e:
@@ -660,7 +639,7 @@ def fetch_telexy_json(
 
 
 # ============================================================
-# CONVERT VALUE TO NUMBER
+# NUMERIC VALUE
 # ============================================================
 
 def numeric_value(value):
@@ -678,14 +657,62 @@ def numeric_value(value):
         )
 
         if match:
+
             return float(
                 match.group(0)
             )
 
     except Exception:
+
         pass
 
     return 0
+
+
+# ============================================================
+# WRITE JSON SAFELY
+# ============================================================
+
+def write_json(filename, data):
+
+    if not isinstance(data, list):
+
+        raise ValueError(
+            f"{filename}: data is not a list"
+        )
+
+    if len(data) == 0:
+
+        raise ValueError(
+            f"{filename}: refusing to write empty JSON"
+        )
+
+    temp_file = filename + ".tmp"
+
+    with open(
+        temp_file,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            data,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
+
+        file.write("\n")
+
+    # Replace only after successful write.
+    os.replace(
+        temp_file,
+        filename
+    )
+
+    print(
+        f"Written {filename}: {len(data)} servers"
+    )
 
 
 # ============================================================
@@ -694,15 +721,14 @@ def numeric_value(value):
 
 def main():
 
+    print()
+    print("=" * 60)
+    print("VPN SERVER UPDATE STARTED")
+    print("=" * 60)
+    print()
+
     all_configs = []
 
-    # Track IP + protocol instead of IP only.
-    # Therefore:
-    #
-    # 1.2.3.4 + TCP
-    # 1.2.3.4 + UDP
-    #
-    # can both exist.
     seen_keys = set()
 
     # ========================================================
@@ -746,17 +772,20 @@ def main():
     )
 
     # ========================================================
-    # CHECK RESULTS
+    # CHECK TOTAL RESULT
     # ========================================================
 
     if not all_configs:
 
-        print("No VPN configurations were collected.")
+        print()
+        print("ERROR: No VPN configurations collected.")
+        print("Existing JSON files will NOT be overwritten.")
+        print()
 
         sys.exit(1)
 
     # ========================================================
-    # NORMALIZE PROTOCOLS
+    # NORMALIZE PROTOCOL
     # ========================================================
 
     for server in all_configs:
@@ -765,8 +794,24 @@ def main():
             server.get("protocol")
         )
 
+    # Remove invalid protocol entries.
+
+    all_configs = [
+        server
+        for server in all_configs
+        if server.get("protocol") in ("tcp", "udp")
+    ]
+
+    if not all_configs:
+
+        print(
+            "ERROR: No valid TCP/UDP servers found."
+        )
+
+        sys.exit(1)
+
     # ========================================================
-    # SEPARATE TCP AND UDP
+    # SEPARATE TCP / UDP
     # ========================================================
 
     tcp_servers = [
@@ -780,6 +825,26 @@ def main():
         for server in all_configs
         if server.get("protocol") == "udp"
     ]
+
+    # ========================================================
+    # CHECK INDIVIDUAL FILES
+    # ========================================================
+
+    if not tcp_servers:
+
+        print(
+            "ERROR: TCP server list is empty."
+        )
+
+        sys.exit(1)
+
+    if not udp_servers:
+
+        print(
+            "ERROR: UDP server list is empty."
+        )
+
+        sys.exit(1)
 
     # ========================================================
     # SORT BY PING
@@ -804,64 +869,32 @@ def main():
     )
 
     # ========================================================
-    # SAVE TCP JSON
+    # WRITE JSON FILES
     # ========================================================
 
-    with open(
+    write_json(
         "tcp.json",
-        "w",
-        encoding="utf-8"
-    ) as file:
+        tcp_servers
+    )
 
-        json.dump(
-            tcp_servers,
-            file,
-            indent=2,
-            ensure_ascii=False
-        )
-
-    # ========================================================
-    # SAVE UDP JSON
-    # ========================================================
-
-    with open(
+    write_json(
         "udp.json",
-        "w",
-        encoding="utf-8"
-    ) as file:
+        udp_servers
+    )
 
-        json.dump(
-            udp_servers,
-            file,
-            indent=2,
-            ensure_ascii=False
-        )
-
-    # ========================================================
-    # SAVE ALL JSON
-    # ========================================================
-
-    with open(
+    write_json(
         "all.json",
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            all_configs,
-            file,
-            indent=2,
-            ensure_ascii=False
-        )
+        all_configs
+    )
 
     # ========================================================
     # SUMMARY
     # ========================================================
 
     print()
-    print("=" * 50)
-    print("VPN SERVER UPDATE SUMMARY")
-    print("=" * 50)
+    print("=" * 60)
+    print("VPN SERVER UPDATE COMPLETE")
+    print("=" * 60)
 
     print(
         f"Total servers : {len(all_configs)}"
@@ -879,18 +912,20 @@ def main():
     print("Generated files:")
 
     print(
-        f"  tcp.json  -> {len(tcp_servers)} servers"
+        f"  tcp.json -> {len(tcp_servers)} servers"
     )
 
     print(
-        f"  udp.json  -> {len(udp_servers)} servers"
+        f"  udp.json -> {len(udp_servers)} servers"
     )
 
     print(
-        f"  all.json  -> {len(all_configs)} servers"
+        f"  all.json -> {len(all_configs)} servers"
     )
 
-    print("=" * 50)
+    print()
+    print("Update completed successfully.")
+    print("=" * 60)
 
 
 # ============================================================
@@ -898,4 +933,22 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-    main()
+
+    try:
+
+        main()
+
+    except KeyboardInterrupt:
+
+        print("Update interrupted.")
+
+        sys.exit(1)
+
+    except Exception as e:
+
+        print()
+        print(
+            f"FATAL ERROR: {e}"
+        )
+
+        sys.exit(1)
